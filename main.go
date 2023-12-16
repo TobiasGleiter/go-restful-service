@@ -2,7 +2,9 @@ package main
 
 import (
 	"net/http"
+	"strings"
 
+	"github.com/dgrijalva/jwt-go"
 	"github.com/gin-gonic/gin"
 )
 
@@ -23,9 +25,9 @@ var albums = []album{
 
 func main() {
 	router := gin.Default()
-	router.GET("/albums", getAlbums)
-	router.GET("/albums/:id", getAlbumByID)
-	router.POST("/albums", postAlbums)
+	router.GET("/albums", AuthMiddleware(), getAlbums)
+	router.GET("/albums/:id", AuthMiddleware(), getAlbumByID)
+	router.POST("/albums", AuthMiddleware(), postAlbums)
 
 	router.Run("localhost:8080")
 }
@@ -64,4 +66,42 @@ func getAlbumByID(c *gin.Context) {
 		}
 	}
 	c.IndentedJSON(http.StatusNotFound, gin.H{"message": "album not found"})
+}
+
+// Security
+var mySigningKey = []byte("secret")
+
+func AuthMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		authHeader := c.GetHeader("Authorization")
+		if authHeader == "" {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+			c.Abort()
+			return
+		}
+
+		tokenString := strings.Split(authHeader, " ")
+		if len(tokenString) != 2 || tokenString[0] != "Bearer" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Malformed token"})
+			c.Abort()
+			return
+		}
+
+		token, err := jwt.Parse(tokenString[1], func(token *jwt.Token) (interface{}, error) {
+			if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+				return nil, jwt.NewValidationError("invalid signing method", jwt.ValidationErrorSignatureInvalid)
+			}
+			return mySigningKey, nil
+		})
+
+		if err != nil || !token.Valid {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid token"})
+			c.Abort()
+			return
+		}
+
+		// Optionally, you can access claims here like claims["user"]
+
+		c.Next()
+	}
 }
